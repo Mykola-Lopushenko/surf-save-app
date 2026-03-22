@@ -1,19 +1,19 @@
 require('dotenv').config();
+
 const express = require('express');
 const exphbs = require('express-handlebars');
 const path = require('path');
 const mysql = require('mysql2/promise');
 
 const app = express();
-const PORT = process.env.PORT || 51015;
+const PORT = Number(process.env.PORT) || 3000;
 
-//DB config use your osu credentials 
 const dbConfig = {
-    host: process.env.DB_HOST || 'localhost',
+    host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
-    port: process.env.DB_PORT || 3306,
+    port: Number(process.env.DB_PORT),
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
