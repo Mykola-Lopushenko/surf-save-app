@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{title}}</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1 class="logo">Surf & Save Ecommerce System</h1>
+            <ul class="nav-menu">
+                <li><a href="/">Home</a></li>
+                <li><a href="/customers">Customers</a></li>
+                <li><a href="/orders">Orders</a></li>
+                <li><a href="/products">Products</a></li>
+                <li><a href="/producttypes">Product Types</a></li>
+                <li><a href="/orderitems">Order Items</a></li>
+                <li>
+                    <a href="/reset" class="nav-reset" onclick="return confirm('Reset database to its default state?')">
+                        Reset
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="container">
+        {{{body}}}
+    </main>
+
+    <footer class="footer">
+    </footer>
+</body>
+</html>

@@ -1,0 +1,616 @@
+require('dotenv').config();
+const express = require('express');
+const exphbs = require('express-handlebars');
+const path = require('path');
+const mysql = require('mysql2/promise');
+
+const app = express();
+const PORT = process.env.PORT || 51015;
+
+//DB config use your osu credentials 
+const dbConfig = {
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    port: process.env.DB_PORT || 3306,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+};
+
+const pool = mysql.createPool(dbConfig);
+
+async function testConnection() {
+    try {
+        const connection = await pool.getConnection();
+        //console log for debugging
+        console.log('Database connected successfully');
+        connection.release();
+    } catch (error) {
+        console.error('Database connection failed:', error.message);
+    }
+}
+testConnection();
+
+
+const handlebarsHelpers = {
+    eq: function(a, b) {
+        return a === b;
+    },
+    multiply: function(a, b) {
+        return (parseFloat(a) * parseInt(b)).toFixed(2);
+    },
+    formatDate: function(date) {
+        return new Date(date).toLocaleDateString();
+    }
+};
+
+//handlebar helpers
+app.engine('hbs', exphbs.engine({
+    extname: '.hbs',
+    defaultLayout: 'main',
+    layoutsDir: path.join(__dirname, 'views'),
+    helpers: handlebarsHelpers
+}));
+
+app.set('view engine', 'hbs');
+app.set('views', path.join(__dirname, 'views'));
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.urlencoded({ extended: true }));
+
+// GET routes
+app.get('/', (req, res) => {
+    res.render('index', { 
+        title: 'Home - E-commerce System',
+        layout: 'main'
+    });
+});
+
+
+app.get('/customers', async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT * FROM Customers ORDER BY customerID');
+        console.log(`Found ${rows.length} customers`);
+        
+        res.render('customers', { 
+            title: 'Browse Customers',
+            customers: rows,
+            layout: 'main',
+            helpers: handlebarsHelpers
+        });
+    } catch (error) {
+        console.error('Error fetching customers:');
+        console.error('   Error message:', error.message);
+        res.status(500).send(`
+            <h1>Database Error</h1>
+            <p>Error fetching customers from database:</p>
+            <pre>${error.message}</pre>
+            <a href="/">Go back home</a>
+        `);
+    }
+});
+
+app.get('/orders', async (req, res) => {
+    try {
+        
+        const [orders] = await pool.query(`
+            SELECT o.*, CONCAT(c.firstName, ' ', c.lastName) as customerName 
+            FROM Orders o
+            JOIN Customers c ON o.customerID = c.customerID
+            ORDER BY o.orderID
+        `);
+        
+        //dropdown for customers
+        const [customers] = await pool.query('SELECT * FROM Customers ORDER BY customerID');
+        
+        res.render('orders', { 
+            title: 'Browse Orders',
+            orders: orders,
+            customers: customers,
+            layout: 'main',
+            helpers: handlebarsHelpers
+        });
+    } catch (error) {
+        console.error('Error fetching orders:', error.message);
+        res.status(500).send(`Error fetching orders: ${error.message}`);
+    }
+});
+
+app.get('/products', async (req, res) => {
+    try {
+        const [products] = await pool.query(`
+            SELECT 
+                Products.productID,
+                Products.productName,
+                Products.price,
+                Products.productTypeID,
+                ProductTypes.description AS productTypeDescription
+            FROM Products
+            INNER JOIN ProductTypes
+                ON Products.productTypeID = ProductTypes.productTypeID
+            ORDER BY Products.productID
+        `);
+
+        const [productTypes] = await pool.query(`
+            SELECT productTypeID, description
+            FROM ProductTypes
+            ORDER BY productTypeID
+        `);
+
+        res.render('products', {
+            title: 'Browse Products',
+            products,
+            productTypes
+        });
+    } catch (error) {
+        console.error('Products route error:', error);
+        res.status(500).send(error.message);
+    }
+});
+
+//select for product types
+app.get('/producttypes', async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT * FROM ProductTypes ORDER BY productTypeID');
+        console.log(`Found ${rows.length} product types`);
+        
+        res.render('producttypes', { 
+            title: 'Browse Product Types',
+            productTypes: rows,
+            layout: 'main',
+            helpers: handlebarsHelpers
+        });
+    } catch (error) {
+        console.error('Error fetching product types:', error.message);
+        res.status(500).send(`Error fetching product types: ${error.message}`);
+    }
+});
+
+//select for order items
+app.get('/orderitems', async (req, res) => {
+    try {
+        
+        const [orderItems] = await pool.query(`
+            SELECT 
+                oi.orderItemID,
+                oi.orderID,
+                oi.productID,
+                oi.quantity,
+                p.productName,
+                p.price as productPrice,
+                o.totalCost as orderTotal,
+                o.orderDate,
+                CONCAT(c.firstName, ' ', c.lastName) as customerName
+            FROM OrderItems oi
+            JOIN Products p ON oi.productID = p.productID
+            JOIN Orders o ON oi.orderID = o.orderID
+            JOIN Customers c ON o.customerID = c.customerID
+            ORDER BY oi.orderItemID
+        `);
+        console.log(`Found ${orderItems.length} order items`);
+        
+        // Drop down menu queries 
+        const [orders] = await pool.query(`
+            SELECT o.*, CONCAT(c.firstName, ' ', c.lastName) as customerName 
+            FROM Orders o
+            JOIN Customers c ON o.customerID = c.customerID
+            ORDER BY o.orderID
+        `);
+
+        const [products] = await pool.query('SELECT * FROM Products ORDER BY productID');
+        
+        res.render('orderitems', { 
+            title: 'Browse Order Items',
+            orderItems: orderItems,
+            orders: orders,
+            products: products,
+            layout: 'main',
+            helpers: handlebarsHelpers
+        });
+    } catch (error) {
+        console.error('Error fetching order items:', error.message);
+        res.status(500).send(`Error fetching order items: ${error.message}`);
+    }
+});
+
+app.get('/edit-orderitem', async (req, res) => {
+    try {
+        const orderItemID = req.query.orderItemID;
+
+        const [orderItemRows] = await pool.query(
+            'SELECT * FROM OrderItems WHERE orderItemID = ?',
+            [orderItemID]
+        );
+
+        const [orders] = await pool.query(`
+            SELECT o.orderID, CONCAT(c.firstName, ' ', c.lastName) AS customerName
+            FROM Orders o
+            JOIN Customers c ON o.customerID = c.customerID
+            ORDER BY o.orderID
+        `);
+
+        const [products] = await pool.query(
+            'SELECT * FROM Products ORDER BY productID'
+        );
+
+        if (orderItemRows.length === 0) {
+            return res.status(404).send('Order item not found');
+        }
+
+        res.render('edit-orderitem', {
+            title: 'Edit Order Item',
+            orderItem: orderItemRows[0],
+            orders: orders,
+            products: products,
+            layout: 'main',
+            helpers: handlebarsHelpers
+        });
+    } catch (error) {
+        console.error('Error loading edit-orderitem page:', error);
+        res.status(500).send(error.message);
+    }
+});
+
+// RESET
+app.get('/reset', async (req, res) => {
+    try {
+        await pool.query('CALL sp_reset_db()');
+        res.redirect('/');
+        } catch (err) {
+        console.error(err);
+        res.status(500).send(err.message);
+    }
+});
+
+
+// POST routes
+app.post('/add-customer', async (req, res) => {
+    try {
+        const { firstName, lastName, email, phone } = req.body;
+
+        if (!firstName || !lastName || !email) {
+            throw new Error('First name, last name, and email are required');
+        }
+
+        const [result] = await pool.query(
+            'INSERT INTO Customers (firstName, lastName, email, phone) VALUES (?, ?, ?, ?)',
+            [firstName, lastName, email, phone || null]
+        );
+
+        res.redirect('/customers');
+        
+    } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+            res.status(400).send(`
+                <h1>Error Adding Customer</h1>
+                <p>Customer exists.</p>
+                <a href="/customers">Go back to Customers</a>
+            `);
+        } else {
+            res.status(500).send(`
+                <h1>Error Adding Customer</h1>
+                <p>Error: ${error.message}</p>
+                <a href="/customers">Go back to Customers</a>
+            `);
+        }
+    }
+});
+
+app.post('/update-customer', async (req, res) => {
+    try {
+        const { customerID, firstName, lastName, email, phone } = req.body;
+
+        await pool.query(
+            `UPDATE Customers
+             SET firstName = ?, lastName = ?, email = ?, phone = ?
+             WHERE customerID = ?`,
+            [firstName, lastName, email, phone || null, customerID]
+        );
+
+        res.redirect('/customers');
+    } catch (error) {
+        console.error('Update customer error:', error);
+        res.status(500).send(error.message);
+    }
+});
+
+app.post('/delete-customer', async (req, res) => {
+    const customerID = req.body.customerID;
+
+    try {
+
+        await pool.query(
+            `DELETE FROM OrderItems
+             WHERE orderID IN (
+                 SELECT orderID FROM Orders
+                 WHERE customerID = ?
+             )`,
+            [customerID]
+        );
+
+        await pool.query(
+            'DELETE FROM Orders WHERE customerID = ?',
+            [customerID]
+        );
+
+        await pool.query(
+            'DELETE FROM Customers WHERE customerID = ?',
+            [customerID]
+        );
+
+        res.redirect('/customers');
+
+    } catch (error) {
+        console.error('Delete customer error:', error);
+        res.status(500).send(error.message);
+    }
+});
+
+app.post('/add-order', async (req, res) => {
+    try {
+        const { customerID, totalCost, orderDate, shippingAddress } = req.body;
+
+        if (!customerID || !totalCost || !orderDate || !shippingAddress) {
+            return res.status(400).send('Missing required order fields.');
+        }
+
+        await pool.query(
+            `INSERT INTO Orders (customerID, totalCost, orderDate, shippingAddress)
+             VALUES (?, ?, ?, ?)`,
+            [customerID, totalCost, orderDate, shippingAddress]
+        );
+
+        res.redirect('/orders');
+    } catch (error) {
+        console.error('Add order error:', error);
+        res.status(500).send(error.message);
+    }
+});
+
+app.post('/update-order', async (req, res) => {
+    try {
+        const { orderID, customerID, totalCost, orderDate, shippingAddress } = req.body;
+
+        if (!orderID || !customerID || !totalCost || !orderDate || !shippingAddress) {
+            return res.status(400).send('Missing required order fields.');
+        }
+
+        await pool.query(
+            `UPDATE Orders
+             SET customerID = ?, totalCost = ?, orderDate = ?, shippingAddress = ?
+             WHERE orderID = ?`,
+            [customerID, totalCost, orderDate, shippingAddress, orderID]
+        );
+
+        res.redirect('/orders');
+    } catch (error) {
+        console.error('Update order error:', error);
+        res.status(500).send(error.message);
+    }
+});
+
+app.post('/delete-order',  async (req, res) => {
+    try {
+        const orderID  =  req.body.orderID;
+
+        await pool.query(
+            'DELETE FROM OrderItems WHERE orderID = ?',
+            [orderID]
+        );
+
+        await pool.query(
+            'DELETE FROM Orders WHERE orderID = ?',
+            [orderID]
+        );
+
+        res.redirect('/orders');
+    }   catch (err) {
+        console.error(err);
+        res.status(500).send(err.message);
+    }
+});
+
+
+app.post('/add-product', async (req, res) => {
+    try {
+        const { productName, price, productTypeID } = req.body;
+
+        if (!productName || !price || !productTypeID) {
+            return res.status(400).send('Missing required product fields.');
+        }
+
+        await pool.query(
+            `INSERT INTO Products (productName, price, productTypeID)
+             VALUES (?, ?, ?)`,
+            [productName, price, productTypeID]
+        );
+
+        res.redirect('/products');
+    } catch (error) {
+        console.error('Add product error:', error);
+        res.status(500).send(error.message);
+    }
+});
+
+app.post('/update-product', async (req, res) => {
+    try {
+        const { productID, productName, price, productTypeID } = req.body;
+
+        if (!productID || !productName || !price || !productTypeID) {
+            return res.status(400).send('Missing required product fields.');
+        }
+
+        await pool.query(
+            `UPDATE Products
+             SET productName = ?, price = ?, productTypeID = ?
+             WHERE productID = ?`,
+            [productName, price, productTypeID, productID]
+        );
+
+        res.redirect('/products');
+    } catch (error) {
+        console.error('Update product error:', error);
+        res.status(500).send(error.message);
+    }
+});
+
+app.post('/delete-product', async (req, res) => {
+    try {
+        const productID  =  req.body.productID;
+
+        await pool.query(
+            'DELETE FROM OrderItems WHERE productID = ?',
+            [productID]
+        );
+
+        await pool.query(
+            'DELETE FROM Products WHERE productID = ?',
+            [productID]
+        );
+
+        res.redirect('/products');
+    }   catch (err) {
+        console.error(err);
+        res.status(500).send(err.message);
+    }
+});
+
+
+app.post('/add-producttype', async (req, res) => {
+    try {
+        const { description } = req.body;
+
+        if (!description || description.trim() === '') {
+            throw new Error('Product type description is required');
+        }
+
+        const trimmedDescription = description.trim();
+        const [result] = await pool.query(
+            'INSERT INTO ProductTypes (description) VALUES (?)',
+            [trimmedDescription]
+        );
+        res.redirect('/producttypes');
+        
+    } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+            res.status(400).send(`
+                <h1>Error Adding Product Type</h1>
+                <p>Product type already exists.</p>
+                <a href="/producttypes">Go back to Product Types</a>
+            `);
+        } else {
+            res.status(500).send(`
+                <h1>Error Adding Product Type</h1>
+                <p>Error: ${error.message}</p>
+                <a href="/producttypes">Go back to Product Types</a>
+            `);
+        }
+    }
+});
+
+app.post('/update-producttype', (req, res) => {
+    console.log('Update product type:', req.body);
+    res.redirect('/producttypes');
+});
+
+app.post('/delete-producttype', async (req, res) => {
+    try {
+        const productTypeID  =  req.body.productTypeID;
+
+        const [products]  =  await pool.query(
+            'SELECT productID FROM Products WHERE productTypeID = ?',
+            [productTypeID]
+        );
+
+        for (let product of products) {
+            await pool.query(
+                'DELETE FROM OrderItems WHERE productID = ?',
+                [product.productID]
+        );
+    }
+
+    await pool.query(
+        'DELETE FROM Products WHERE productTypeID = ?',
+        [productTypeID]
+    );
+
+    await pool.query(
+        'DELETE FROM ProductTypes WHERE productTypeID = ?',
+        [productTypeID]
+    );
+
+    res.redirect('/producttypes');
+    } catch (err) {
+    console.error(err);
+    res.status(500).send(err.message);
+    }
+});
+
+// Order Items
+app.post('/add-orderitem', async (req, res) => {
+    try {
+        const orderID = req.body.orderID;
+        const productID = req.body.productID;
+        const quantity = req.body.quantity;
+
+        await pool.query(
+            'INSERT INTO OrderItems (orderID, productID, quantity) VALUES (?, ?, ?)',
+            [orderID, productID, quantity]
+        );
+
+        res.redirect('/orderitems');
+    } catch (error) {
+        console.error('Add order item error:', error);
+        res.status(500).send(error.message);
+    }
+});
+
+app.post('/update-orderitem', async (req, res) => {
+    try {
+        const { orderItemID, orderID, productID, quantity } = req.body;
+
+        if (!orderItemID || !orderID || !productID || !quantity) {
+            return res.status(400).send('Missing required fields.');
+        }
+
+        await pool.query(
+            'UPDATE OrderItems SET orderID = ?, productID = ?, quantity = ? WHERE orderItemID = ?',
+            [orderID, productID, quantity, orderItemID]
+        );
+
+        res.redirect('/orderitems');
+    } catch (error) {
+        console.error('Update order item error:', error);
+        res.status(500).send(error.message);
+    }
+});
+
+app.post('/delete-orderitem',  async (req,  res)  =>  {
+    try {
+        const  orderItemID  =  req.body.orderItemID
+
+        await  pool.query(
+            'DELETE  FROM  OrderItems  WHERE  orderItemID  =  ?',
+            [orderItemID]
+        )
+
+        res.redirect('/orderitems')
+    }   catch  (err)  {
+        console.error(err)
+        res.status(500).send(err.message)
+    }
+})
+
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Access at: http://localhost:${PORT}`);
+    console.log('Pages:');
+    console.log('   - /customers');
+    console.log('   - /orders');
+    console.log('   - /products');
+    console.log('   - /producttypes');
+    console.log('   - /orderitems');
+});
