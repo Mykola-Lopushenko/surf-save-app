@@ -1,6 +1,6 @@
 # 🌊 Surf & Save
 
-Live Demo: https://surf-save-app-production.up.railway.app/
+Live Demo: https://surf-save-app-production-7109.up.railway.app/products
 
 Full-stack web application for managing a surf retail system, including customers, products, orders, and order items.
 
